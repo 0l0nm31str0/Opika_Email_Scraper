@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Opika Leads — Email Lead Generator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f9f9f9;
+      color: #111;
+      line-height: 1.5;
+      padding: 24px 16px;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 28px;
+    }
+
+    /* --- Form elements --- */
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 4px;
+    }
+
+    .helper {
+      font-size: 12px;
+      color: #999;
+      margin-top: 2px;
+    }
+
+    input[type="text"], select, textarea {
+      width: 100%;
+      height: 36px;
+      padding: 0 10px;
+      font-size: 14px;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      background: #fff;
+      color: #111;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus, select:focus, textarea:focus {
+      border-color: #305A81;
+    }
+
+    textarea {
+      height: 56px;
+      padding: 10px;
+      resize: vertical;
+    }
+
+    .section {
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .row > .col { flex: 1; }
+
+    .row-3 > .col { flex: 1; }
+
+    /* --- Tag input --- */
+    .tag-input-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 10px;
+      min-height: 36px;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      background: #fff;
+      cursor: text;
+      align-items: center;
+    }
+
+    .tag-input-wrap:focus-within { border-color: #305A81; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #eef3f8;
+      color: #305A81;
+      font-size: 13px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+
+    .tag .remove {
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      opacity: 0.6;
+    }
+
+    .tag .remove:hover { opacity: 1; }
+
+    .tag-input {
+      border: none;
+      outline: none;
+      font-size: 14px;
+      flex: 1;
+      min-width: 80px;
+      height: 24px;
+      padding: 0;
+    }
+
+    /* --- Slider --- */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .slider-row input[type="range"] {
+      flex: 1;
+      height: 4px;
+      accent-color: #305A81;
+    }
+
+    .slider-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #305A81;
+      white-space: nowrap;
+      min-width: 80px;
+      text-align: right;
+    }
+
+    /* --- Collapsible --- */
+    .collapse-header {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      gap: 8px;
+    }
+
+    .collapse-header .badge {
+      font-size: 11px;
+      color: #999;
+      background: #f3f3f3;
+      padding: 1px 8px;
+      border-radius: 4px;
+    }
+
+    .collapse-header .arrow {
+      margin-left: auto;
+      font-size: 12px;
+      transition: transform 0.2s;
+      color: #999;
+    }
+
+    .collapse-header.open .arrow { transform: rotate(180deg); }
+
+    .collapse-body {
+      display: none;
+      margin-top: 16px;
+    }
+
+    .collapse-body.open { display: block; }
+
+    /* --- Run button --- */
+    .run-btn {
+      width: 100%;
+      height: 44px;
+      background: #305A81;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: opacity 0.15s;
+    }
+
+    .run-btn:hover { opacity: 0.9; }
+
+    .run-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .spinner {
+      display: none;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .run-btn.loading .spinner { display: inline-block; }
+
+    /* --- Log panel --- */
+    #log-panel {
+      display: none;
+      background: #111;
+      color: #ccc;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      max-height: 360px;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+
+    .log-line { white-space: pre-wrap; word-break: break-word; }
+    .log-line .ts { color: #666; margin-right: 8px; }
+    .log-line.success { color: #4ade80; }
+    .log-line.error { color: #f87171; }
+    .log-line.info { color: #ccc; }
+
+    /* --- Results card --- */
+    #results-card {
+      display: none;
+      margin-top: 16px;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 24px;
+      margin-bottom: 16px;
+    }
+
+    .results-grid .stat {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      padding: 4px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .stat .label { color: #666; }
+    .stat .value { font-weight: 600; }
+
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 40px;
+      padding: 0 20px;
+      background: #305A81;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      margin-right: 8px;
+    }
+
+    .download-btn:hover { opacity: 0.9; }
+
+    /* --- Mobile --- */
+    @media (max-width: 640px) {
+      .row, .row.row-3 { flex-direction: column; gap: 14px; }
+      .results-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Opika Leads</h1>
+    <p class="subtitle">Find and validate real business email addresses from free sources</p>
+
+    <form id="lead-form" autocomplete="off">
+
+      <!-- Section 1 — Plain English Input -->
+      <div class="section">
+        <label for="plain_text">Who are you targeting?</label>
+        <textarea id="plain_text" name="plain_text"
+          placeholder="e.g. HVAC company owners and operations managers in Florida"></textarea>
+        <p class="helper">Plain English — industry, location, and titles are auto-detected from this</p>
+      </div>
+
+      <!-- Section 2 — Required Fields -->
+      <div class="section">
+        <div class="section-title">Required</div>
+
+        <div class="row">
+          <div class="col">
+            <label for="industry">Industry</label>
+            <select id="industry" name="industry">
+              <option>— auto-detected —</option>
+              <option>HVAC / Home Services</option>
+              <option>Personal Injury Law</option>
+              <option>Self Storage</option>
+              <option>Roofing</option>
+              <option>Plumbing</option>
+              <option>Real Estate</option>
+              <option>Dental / Medical</option>
+              <option>Insurance</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="col">
+            <label for="location">Location</label>
+            <input type="text" id="location" name="location" placeholder="e.g. Florida, USA">
+          </div>
+        </div>
+
+        <!-- Tag input for job titles -->
+        <div style="margin-bottom: 14px;">
+          <label>Target job titles</label>
+          <div class="tag-input-wrap" id="title-tags">
+            <span class="tag">Owner<span class="remove" onclick="removeTag(this)">&times;</span></span>
+            <span class="tag">CEO<span class="remove" onclick="removeTag(this)">&times;</span></span>
+            <input class="tag-input" id="title-input" placeholder="Type a title and press Enter">
+          </div>
+        </div>
+
+        <!-- Target count slider -->
+        <label for="target_count">Target count</label>
+        <div class="slider-row">
+          <input type="range" id="target_count" name="target_count"
+            min="50" max="1000" step="50" value="200">
+          <span class="slider-value" id="count-display">200 leads</span>
+        </div>
+      </div>
+
+      <!-- Section 3 — Optional Filters (collapsible) -->
+      <div class="section">
+        <div class="collapse-header" id="opt-header" onclick="toggleOptional()">
+          <span class="section-title" style="margin-bottom:0">Optional filters</span>
+          <span class="badge">optional</span>
+          <span class="arrow">&#9660;</span>
+        </div>
+        <div class="collapse-body" id="opt-body">
+
+          <div class="row">
+            <div class="col">
+              <label for="revenue_filter">Annual revenue</label>
+              <select id="revenue_filter" name="revenue_filter">
+                <option>Any</option>
+                <option>Under $1M</option>
+                <option>$1M – $5M</option>
+                <option>$5M – $10M</option>
+                <option>$10M – $25M</option>
+                <option>$25M – $50M</option>
+                <option>$50M – $100M</option>
+                <option>Over $100M</option>
+              </select>
+            </div>
+            <div class="col">
+              <label for="size_filter">Company size (employees)</label>
+              <select id="size_filter" name="size_filter">
+                <option>Any</option>
+                <option>1 – 5</option>
+                <option>6 – 20</option>
+                <option>21 – 50</option>
+                <option>51 – 100</option>
+                <option>101 – 250</option>
+                <option>251 – 500</option>
+                <option>500+</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col">
+              <label for="age_filter">Company age</label>
+              <select id="age_filter" name="age_filter">
+                <option>Any</option>
+                <option>Less than 1 year</option>
+                <option>1 – 3 years</option>
+                <option>3 – 5 years</option>
+                <option>5 – 10 years</option>
+                <option>10+ years</option>
+              </select>
+            </div>
+            <div class="col">
+              <label for="validate_level">Validation depth</label>
+              <select id="validate_level" name="validate_level">
+                <option value="deep">Deep — SMTP verify</option>
+                <option value="basic">Basic — MX only (faster)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row row-3">
+            <div class="col">
+              <label for="sources_filter">Sources</label>
+              <select id="sources_filter" name="sources_filter">
+                <option>All sources</option>
+                <option>Google Maps only</option>
+                <option>Yelp only</option>
+                <option>Website crawl only</option>
+              </select>
+            </div>
+            <div class="col">
+              <label for="output_format">Output format</label>
+              <select id="output_format" name="output_format">
+                <option>CSV</option>
+                <option>JSON</option>
+                <option>Both</option>
+              </select>
+            </div>
+            <div class="col">
+              <label for="output_filename">Output filename</label>
+              <input type="text" id="output_filename" name="output_filename" placeholder="leads_output">
+            </div>
+          </div>
+
+          <div style="margin-top: 4px;">
+            <label for="domain_list">Domain list <span class="badge">skips discovery</span></label>
+            <input type="text" id="domain_list" name="domain_list"
+              placeholder="path/to/domains.txt — bypasses Maps/Yelp scraping">
+            <p class="helper">Optional — if you already have a list of company websites, paste the file path here</p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Section 4 — Run Button -->
+      <button type="submit" class="run-btn" id="run-btn">
+        <span class="spinner"></span>
+        <span class="btn-text">Generate leads &rarr;</span>
+      </button>
+    </form>
+
+    <!-- Section 5 — Live Log Panel -->
+    <div id="log-panel"></div>
+
+    <!-- Section 6 — Results Summary Card -->
+    <div id="results-card" class="section">
+      <div class="section-title">Results</div>
+      <div class="results-grid" id="results-grid"></div>
+      <div id="download-buttons"></div>
+    </div>
+
+  </div>
+
+  <script>
+    // --- Tag input ---
+    const titleInput = document.getElementById('title-input');
+    const titleTags = document.getElementById('title-tags');
+
+    titleInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = this.value.trim();
+        if (!val) return;
+        addTag(val);
+        this.value = '';
+      }
+    });
+
+    // Click on the tag area focuses the input
+    titleTags.addEventListener('click', () => titleInput.focus());
+
+    function addTag(text) {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.innerHTML = text + '<span class="remove" onclick="removeTag(this)">&times;</span>';
+      titleTags.insertBefore(tag, titleInput);
+    }
+
+    function removeTag(el) {
+      el.parentElement.remove();
+    }
+
+    function getTitles() {
+      return Array.from(titleTags.querySelectorAll('.tag'))
+        .map(t => t.textContent.replace('×', '').trim())
+        .filter(Boolean);
+    }
+
+    // --- Slider ---
+    const slider = document.getElementById('target_count');
+    const countDisplay = document.getElementById('count-display');
+    slider.addEventListener('input', () => {
+      countDisplay.textContent = slider.value + ' leads';
+    });
+
+    // --- Collapsible ---
+    function toggleOptional() {
+      const header = document.getElementById('opt-header');
+      const body = document.getElementById('opt-body');
+      header.classList.toggle('open');
+      body.classList.toggle('open');
+    }
+
+    // --- Form submission ---
+    const form = document.getElementById('lead-form');
+    const runBtn = document.getElementById('run-btn');
+    const logPanel = document.getElementById('log-panel');
+    const resultsCard = document.getElementById('results-card');
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      // Disable button, show spinner
+      runBtn.disabled = true;
+      runBtn.classList.add('loading');
+
+      // Reset UI
+      logPanel.style.display = 'block';
+      logPanel.innerHTML = '';
+      resultsCard.style.display = 'none';
+
+      // Build form data
+      const fd = new FormData(form);
+      // Add tag titles
+      fd.delete('titles');
+      getTitles().forEach(t => fd.append('titles', t));
+
+      try {
+        const resp = await fetch('/run', { method: 'POST', body: fd });
+        const data = await resp.json();
+        const runId = data.run_id;
+
+        // Start SSE stream
+        const source = new EventSource('/stream/' + runId);
+
+        source.onmessage = function(event) {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'keepalive') return;
+
+          if (msg.type === 'log') {
+            const line = document.createElement('div');
+            line.className = 'log-line ' + msg.status;
+
+            let icon = '→';
+            if (msg.status === 'success') icon = '✓';
+            else if (msg.status === 'error') icon = '✕';
+
+            line.innerHTML = '<span class="ts">' + (msg.ts || '') + '</span>' + icon + ' ' + escapeHtml(msg.msg);
+            logPanel.appendChild(line);
+            logPanel.scrollTop = logPanel.scrollHeight;
+          }
+
+          if (msg.type === 'complete') {
+            source.close();
+            runBtn.disabled = false;
+            runBtn.classList.remove('loading');
+            showResults(msg.summary, msg.files);
+          }
+        };
+
+        source.onerror = function() {
+          source.close();
+          runBtn.disabled = false;
+          runBtn.classList.remove('loading');
+          appendLog('Connection lost — check server logs', 'error');
+        };
+
+      } catch (err) {
+        runBtn.disabled = false;
+        runBtn.classList.remove('loading');
+        appendLog('Failed to start run: ' + err.message, 'error');
+      }
+    });
+
+    function appendLog(msg, status) {
+      const line = document.createElement('div');
+      line.className = 'log-line ' + (status || 'info');
+      line.textContent = msg;
+      logPanel.appendChild(line);
+      logPanel.scrollTop = logPanel.scrollHeight;
+    }
+
+    function showResults(summary, files) {
+      const grid = document.getElementById('results-grid');
+      const dlBtns = document.getElementById('download-buttons');
+      grid.innerHTML = '';
+      dlBtns.innerHTML = '';
+
+      if (summary.error) {
+        grid.innerHTML = '<div style="color:#f87171;grid-column:1/-1;">Error: ' + escapeHtml(summary.error) + '</div>';
+        resultsCard.style.display = 'block';
+        return;
+      }
+
+      const stats = [
+        ['Domains discovered', summary.domains_discovered || 0],
+        ['Raw emails found', summary.raw_emails_found || 0],
+        ['After deduplication', summary.after_dedup || 0],
+        ['Validated (SMTP)', summary.validated_smtp || 0],
+        ['Catch-all', summary.catch_all || 0],
+        ['Invalid / Unknown', summary.invalid_unknown || 0],
+        ['Estimated deliverability', (summary.deliverability_pct || 0) + '%'],
+        ['Total contacts', summary.total_contacts || 0],
+      ];
+
+      stats.forEach(([label, value]) => {
+        grid.innerHTML += '<div class="stat"><span class="label">' + label + '</span><span class="value">' + value + '</span></div>';
+      });
+
+      (files || []).forEach(f => {
+        const a = document.createElement('a');
+        a.href = '/download/' + f;
+        a.className = 'download-btn';
+        a.textContent = 'Download ' + f + ' ↓';
+        dlBtns.appendChild(a);
+      });
+
+      resultsCard.style.display = 'block';
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

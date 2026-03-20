@@ -154,8 +154,8 @@ async def _do_maps_scrape(url, query, target_count, _log, debug, async_playwrigh
             except Exception:
                 continue
 
-        # Extract details from individual listings (first 30 max)
-        detail_limit = min(len(results), target_count, 30)
+        # Extract details from individual listings
+        detail_limit = min(len(results), target_count)
         items_for_detail = await page.query_selector_all('div[role="feed"] > div > div > a')
         for i, item in enumerate(items_for_detail[:detail_limit]):
             try:

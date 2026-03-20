@@ -67,4 +67,6 @@ GENERIC_PREFIXES = {
 CRAWL_PATHS = [
     "/", "/contact", "/contact-us", "/about", "/about-us",
     "/team", "/staff", "/people", "/leadership", "/our-team",
+    "/get-in-touch", "/connect", "/management", "/owners",
+    "/company", "/who-we-are", "/meet-the-team", "/our-staff",
 ]

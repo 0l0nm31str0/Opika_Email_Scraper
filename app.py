@@ -206,7 +206,7 @@ def _run_pipeline(run_id: str, params: dict):
         if not user_domains and sources_filter in ("All sources",):
             try:
                 dork_companies, dork_domains = loop.run_until_complete(
-                    scrape_google_dorks(industry, location, discovered_domains, log)
+                    scrape_google_dorks(industry, location, discovered_domains, log, titles=target_titles)
                 )
                 all_contacts.extend(dork_companies)
                 for url in dork_domains:

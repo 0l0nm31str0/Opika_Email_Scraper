@@ -27,6 +27,20 @@ EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 # Simple pattern to detect person names near emails (First Last format)
 NAME_RE = re.compile(r"\b([A-Z][a-z]{1,20})\s+([A-Z][a-z]{1,20})\b")
 
+# Domains that are never real company email domains
+_FREEMAIL_DOMAINS = {
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
+    "icloud.com", "mail.com", "protonmail.com", "yandex.com", "zoho.com",
+    "live.com", "msn.com", "me.com", "gmx.com", "fastmail.com",
+}
+
+# Image / asset file extensions to skip
+_SKIP_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+    ".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".map",
+    ".pdf", ".zip", ".mp4", ".mp3",
+}
+
 
 async def crawl_domains(
     domains: list[str],
@@ -73,11 +87,12 @@ async def _crawl_domain(domain: str, _log: Callable) -> list[dict]:
 
     headers = {
         "User-Agent": random.choice(config.USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     async with httpx.AsyncClient(
-        timeout=config.REQUEST_TIMEOUT,
+        timeout=15.0,  # Longer timeout for small business sites
         follow_redirects=True,
         headers=headers,
     ) as client:
@@ -109,30 +124,77 @@ async def _crawl_domain(domain: str, _log: Callable) -> list[dict]:
 
                 # --- Extract mailto: links ---
                 for a in soup.select("a[href^='mailto:']"):
-                    email = a["href"].replace("mailto:", "").split("?")[0].strip().lower()
-                    if _is_personal_email(email, parsed_domain):
+                    raw = a["href"].replace("mailto:", "").split("?")[0].strip().lower()
+                    if not EMAIL_RE.match(raw):
+                        continue
+                    email_domain = raw.split("@")[1]
+                    is_company = email_domain == parsed_domain
+                    is_generic = raw.split("@")[0] in config.GENERIC_PREFIXES
+                    is_freemail = email_domain in _FREEMAIL_DOMAINS
+
+                    if is_company and not is_generic:
+                        # Personal email on company domain — best quality
                         name = _guess_name_from_context(a, soup)
                         contacts.append({
-                            "email": email,
+                            "email": raw,
                             "first_name": name[0],
                             "last_name": name[1],
                             "company_domain": parsed_domain,
+                            "source": "website_crawl",
+                        })
+                    elif is_company and is_generic:
+                        # Generic company email (info@, contact@) — still useful
+                        contacts.append({
+                            "email": raw,
+                            "first_name": "",
+                            "last_name": "",
+                            "company_domain": parsed_domain,
+                            "source": "website_crawl",
+                        })
+                    elif not is_freemail and not is_generic:
+                        # Email on a different non-freemail domain — could be
+                        # a subsidiary or partner, still capture it
+                        name = _guess_name_from_context(a, soup)
+                        contacts.append({
+                            "email": raw,
+                            "first_name": name[0],
+                            "last_name": name[1],
+                            "company_domain": email_domain,
                             "source": "website_crawl",
                         })
 
                 # --- Regex extract from page text ---
                 for email in EMAIL_RE.findall(page_text):
                     email = email.lower()
+                    # Skip obvious non-emails (image filenames, CSS classes, etc.)
+                    if any(email.endswith(ext) for ext in _SKIP_EXTENSIONS):
+                        continue
                     email_domain = email.split("@")[1]
-                    if email_domain == parsed_domain and _is_personal_email(email, parsed_domain):
-                        if not any(c["email"] == email for c in contacts):
-                            contacts.append({
-                                "email": email,
-                                "first_name": "",
-                                "last_name": "",
-                                "company_domain": parsed_domain,
-                                "source": "website_crawl",
-                            })
+                    is_freemail = email_domain in _FREEMAIL_DOMAINS
+                    prefix = email.split("@")[0]
+
+                    # Already captured via mailto?
+                    if any(c["email"] == email for c in contacts):
+                        continue
+
+                    if email_domain == parsed_domain:
+                        # On company domain — accept all (personal + generic)
+                        contacts.append({
+                            "email": email,
+                            "first_name": "",
+                            "last_name": "",
+                            "company_domain": parsed_domain,
+                            "source": "website_crawl",
+                        })
+                    elif not is_freemail and prefix not in config.GENERIC_PREFIXES:
+                        # Non-freemail, non-generic on different domain
+                        contacts.append({
+                            "email": email,
+                            "first_name": "",
+                            "last_name": "",
+                            "company_domain": email_domain,
+                            "source": "website_crawl",
+                        })
 
                 # --- Extract person names from team/staff sections ---
                 _extract_names_near_emails(soup, contacts, parsed_domain)
@@ -154,18 +216,6 @@ def _normalise_url(domain: str) -> str:
     if domain.startswith("http"):
         return domain
     return f"https://{domain}"
-
-
-def _is_personal_email(email: str, domain: str) -> bool:
-    """Filter out generic addresses — keep only personal-looking ones."""
-    prefix = email.split("@")[0].lower()
-    if prefix in config.GENERIC_PREFIXES:
-        return False
-    # Must be on the company's domain
-    email_domain = email.split("@")[1].lower()
-    if domain and email_domain != domain:
-        return False
-    return True
 
 
 def _guess_name_from_context(anchor_el, soup) -> tuple[str, str]:

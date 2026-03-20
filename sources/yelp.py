@@ -1,11 +1,13 @@
 """
-Yelp scraper — uses httpx (no JS rendering needed) to paginate through
+Yelp scraper — uses Playwright (headless Chromium) to paginate through
 Yelp search results and extract business listings.
+
+Playwright is required because Yelp returns 403 to plain HTTP clients.
 
 Rate-limiting:
   - 3–5 second random delay between page requests
-  - Rotating User-Agent strings
-  - 45-second retry on 429/500/529, up to 3 retries per page
+  - Rotating User-Agent strings + random viewport
+  - 45-second retry on blocks, up to 3 retries per page
 """
 
 from __future__ import annotations
@@ -13,15 +15,13 @@ from __future__ import annotations
 import asyncio
 import random
 import re
-import urllib.parse
 from typing import Callable, Optional
+from urllib.parse import urlparse
 
-import httpx
-from bs4 import BeautifulSoup
 from loguru import logger
 
 import config
-from utils.retry import RETRY_DELAY as UTIL_RETRY_DELAY, MAX_RETRIES, RETRYABLE_STATUS_CODES
+from utils.retry import RETRY_DELAY as UTIL_RETRY_DELAY, MAX_RETRIES
 
 
 async def scrape_yelp(
@@ -47,96 +47,104 @@ async def scrape_yelp(
 
     _log(f"[Yelp] Searching: {industry} in {location}")
 
-    base_url = "https://www.yelp.com/search"
-    offset = 0
-    page_size = 24  # Yelp's default page size
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        _log("[Yelp] playwright not installed — skipping", "error")
+        return results
 
-    async with httpx.AsyncClient(timeout=config.REQUEST_TIMEOUT, follow_redirects=True) as client:
-        while len(results) < target_count:
-            params = {
-                "find_desc": industry,
-                "find_loc": location,
-                "start": offset,
-            }
-            headers = {
-                "User-Agent": random.choice(config.USER_AGENTS),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
+    async with async_playwright() as pw:
+        viewport = random.choice(config.VIEWPORT_SIZES)
+        ua = random.choice(config.USER_AGENTS)
+
+        browser = await pw.chromium.launch(headless=True)
+        context = await browser.new_context(viewport=viewport, user_agent=ua)
+        page = await context.new_page()
+
+        offset = 0
+        page_size = 10  # Yelp shows ~10 results per page
+        consecutive_empty = 0
+
+        while len(results) < target_count and consecutive_empty < 2:
+            url = f"https://www.yelp.com/search?find_desc={_url_encode(industry)}&find_loc={_url_encode(location)}&start={offset}"
 
             try:
-                # 45-second retry logic for retryable status codes (429, 500, 529)
-                resp = None
+                blocked = False
                 for retry_attempt in range(MAX_RETRIES + 1):
-                    resp = await client.get(base_url, params=params, headers=headers)
-                    if resp.status_code in RETRYABLE_STATUS_CODES:
+                    resp = await page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+
+                    status = resp.status if resp else 0
+                    content = await page.content()
+
+                    if status == 403 or status == 503 or "unusual activity" in content.lower():
                         if retry_attempt < MAX_RETRIES:
                             _log(
-                                f"[Yelp] HTTP {resp.status_code} on attempt {retry_attempt+1}/{MAX_RETRIES+1} "
+                                f"[Yelp] HTTP {status} on attempt {retry_attempt+1}/{MAX_RETRIES+1} "
                                 f"— retrying in {UTIL_RETRY_DELAY}s…",
                                 "error",
                             )
                             await asyncio.sleep(UTIL_RETRY_DELAY)
                             continue
                         else:
-                            _log(f"[Yelp] HTTP {resp.status_code} after {MAX_RETRIES+1} attempts — skipping Yelp", "error")
+                            _log(f"[Yelp] HTTP {status} after {MAX_RETRIES+1} attempts — skipping Yelp", "error")
+                            blocked = True
                             break
                     else:
-                        break  # non-retryable status or success
-
-                if resp is None or resp.status_code in RETRYABLE_STATUS_CODES:
-                    break
-
-                if resp.status_code != 200:
-                    _log(f"[Yelp] HTTP {resp.status_code} — skipping", "error")
-                    break
-                soup = BeautifulSoup(resp.text, "lxml")
-
-                # Yelp renders business cards in search results
-                listings = soup.select('div[data-testid="serp-ia-card"]') or soup.select('li .css-1m051bw')
-                if not listings:
-                    # Try broader selector as Yelp changes markup often
-                    listings = soup.select('div.container__09f24__mpR8_ a') or []
-                    if not listings:
-                        _log(f"[Yelp] No listings found on page offset={offset} — stopping", "info")
                         break
 
+                if blocked:
+                    break
+
+                if resp and resp.status != 200:
+                    _log(f"[Yelp] HTTP {resp.status} — skipping", "error")
+                    break
+
+                # Extract business listings from the rendered page
+                # Try multiple selectors since Yelp changes markup frequently
+                cards = await page.query_selector_all('[data-testid="serp-ia-card"]')
+                if not cards:
+                    cards = await page.query_selector_all('div.container__09f24__mpR8_')
+                if not cards:
+                    # Broader fallback: any search result with a biz link
+                    cards = await page.query_selector_all('li h3 a[href*="/biz/"], li h4 a[href*="/biz/"]')
+
+                if not cards:
+                    consecutive_empty += 1
+                    _log(f"[Yelp] No listings found on page offset={offset}")
+                    offset += page_size
+                    await asyncio.sleep(random.uniform(3.0, 5.0))
+                    continue
+
+                consecutive_empty = 0
                 page_results = 0
-                for card in listings:
+
+                for card in cards:
                     try:
-                        # Business name
-                        name_el = card.select_one('a[href*="/biz/"]')
-                        if not name_el:
-                            continue
-                        name = name_el.get_text(strip=True)
-                        biz_url = name_el.get("href", "")
-
-                        # Website (not always on search page — often on biz detail)
-                        website = ""
-                        phone = ""
-                        address = ""
-
-                        # Try to get address from the card
-                        addr_el = card.select_one('address') or card.select_one('.css-e81eai')
-                        if addr_el:
-                            address = addr_el.get_text(strip=True)
-
-                        # Extract domain from Yelp biz link for dedup
-                        domain = ""
-                        if website:
-                            domain = _extract_domain(website)
-                            if domain in existing_domains:
+                        # Try to find business name link
+                        biz_link = await card.query_selector('a[href*="/biz/"]')
+                        if not biz_link:
+                            # Card itself might be the link
+                            href = await card.get_attribute("href") or ""
+                            if "/biz/" in href:
+                                name = await card.inner_text()
+                            else:
                                 continue
-                            existing_domains.add(domain)
+                        else:
+                            name = await biz_link.inner_text()
+                            href = await biz_link.get_attribute("href") or ""
+
+                        name = name.strip()
+                        if not name:
+                            continue
 
                         results.append({
                             "business_name": name,
-                            "website_url": website,
-                            "phone": phone,
-                            "address": address,
+                            "website_url": "",
+                            "phone": "",
+                            "address": "",
                             "category": industry,
                             "source": "yelp",
-                            "_yelp_biz_url": biz_url,
                         })
                         page_results += 1
 
@@ -146,33 +154,81 @@ async def scrape_yelp(
                 _log(f"[Yelp] Page offset={offset}: {page_results} new listings (total: {len(results)})")
 
                 if page_results == 0:
-                    break
+                    consecutive_empty += 1
 
                 offset += page_size
                 # Rate-limit: 3-5 second delay between pages
                 await asyncio.sleep(random.uniform(3.0, 5.0))
 
-            except httpx.TimeoutException:
-                _log(f"[Yelp] Timeout on offset={offset} — retrying in {UTIL_RETRY_DELAY}s", "error")
-                offset += page_size
-                await asyncio.sleep(UTIL_RETRY_DELAY)
-                continue
             except Exception as exc:
-                _log(f"[Yelp] Error: {exc}", "error")
+                _log(f"[Yelp] Error at offset={offset}: {exc}", "error")
                 break
 
-    # Clean up internal keys
-    for r in results:
-        r.pop("_yelp_biz_url", None)
+        # --- Detail enrichment: visit first N biz pages for website/phone ---
+        biz_with_no_website = [r for r in results if not r.get("website_url")]
+        detail_limit = min(len(biz_with_no_website), 20)
+        if detail_limit > 0:
+            _log(f"[Yelp] Enriching details for {detail_limit} businesses…")
+            for r in biz_with_no_website[:detail_limit]:
+                try:
+                    # Search for the business on Yelp by name
+                    biz_name = r["business_name"]
+                    search_url = f"https://www.yelp.com/search?find_desc={_url_encode(biz_name)}&find_loc={_url_encode(location)}"
+                    await page.goto(search_url, timeout=20_000, wait_until="domcontentloaded")
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+
+                    # Find first biz link
+                    biz_link = await page.query_selector('a[href*="/biz/"]')
+                    if biz_link:
+                        href = await biz_link.get_attribute("href") or ""
+                        if href.startswith("/"):
+                            href = f"https://www.yelp.com{href}"
+                        if "/biz/" in href:
+                            await page.goto(href, timeout=20_000, wait_until="domcontentloaded")
+                            await asyncio.sleep(random.uniform(1.5, 3.0))
+
+                            # Extract website
+                            website_el = await page.query_selector('a[href*="biz_redir"]')
+                            if not website_el:
+                                website_el = await page.query_selector('p:has-text("Business website") + p a')
+                            if website_el:
+                                website = await website_el.get_attribute("href") or ""
+                                if website:
+                                    r["website_url"] = website
+                                    domain = _extract_domain(website)
+                                    if domain:
+                                        existing_domains.add(domain)
+
+                            # Extract phone
+                            phone_el = await page.query_selector('p:has-text("Phone number") + p')
+                            if phone_el:
+                                r["phone"] = (await phone_el.inner_text()).strip()
+
+                            # Extract address
+                            addr_el = await page.query_selector('a[href*="map"] p, address')
+                            if addr_el:
+                                r["address"] = (await addr_el.inner_text()).strip()
+
+                except Exception:
+                    continue
+
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+
+        await browser.close()
 
     _log(f"[Yelp] Extracted {len(results)} businesses", "success")
     return results
 
 
+def _url_encode(text: str) -> str:
+    """Simple URL encoding for query params."""
+    import urllib.parse
+    return urllib.parse.quote_plus(text)
+
+
 def _extract_domain(url: str) -> str:
     """Pull the bare domain from a URL."""
     try:
-        from urllib.parse import urlparse
         parsed = urlparse(url if url.startswith("http") else f"https://{url}")
         return parsed.netloc.lower().replace("www.", "")
     except Exception:

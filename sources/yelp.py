@@ -138,6 +138,11 @@ async def scrape_yelp(
                         if not name:
                             continue
 
+                        # Build full Yelp biz URL for detail enrichment
+                        biz_url = ""
+                        if href and "/biz/" in href:
+                            biz_url = href if href.startswith("http") else f"https://www.yelp.com{href}"
+
                         results.append({
                             "business_name": name,
                             "website_url": "",
@@ -145,6 +150,7 @@ async def scrape_yelp(
                             "address": "",
                             "category": industry,
                             "source": "yelp",
+                            "_yelp_biz_url": biz_url,
                         })
                         page_results += 1
 
@@ -164,50 +170,59 @@ async def scrape_yelp(
                 _log(f"[Yelp] Error at offset={offset}: {exc}", "error")
                 break
 
-        # --- Detail enrichment: visit first N biz pages for website/phone ---
-        biz_with_no_website = [r for r in results if not r.get("website_url")]
-        detail_limit = min(len(biz_with_no_website), 20)
+        # --- Detail enrichment: visit biz pages for website/phone ---
+        biz_with_urls = [r for r in results if r.get("_yelp_biz_url")]
+        detail_limit = min(len(biz_with_urls), 30)
         if detail_limit > 0:
             _log(f"[Yelp] Enriching details for {detail_limit} businesses…")
-            for r in biz_with_no_website[:detail_limit]:
+            for r in biz_with_urls[:detail_limit]:
                 try:
-                    # Search for the business on Yelp by name
-                    biz_name = r["business_name"]
-                    search_url = f"https://www.yelp.com/search?find_desc={_url_encode(biz_name)}&find_loc={_url_encode(location)}"
-                    await page.goto(search_url, timeout=20_000, wait_until="domcontentloaded")
+                    biz_url = r["_yelp_biz_url"]
+                    await page.goto(biz_url, timeout=20_000, wait_until="domcontentloaded")
                     await asyncio.sleep(random.uniform(1.5, 3.0))
 
-                    # Find first biz link
-                    biz_link = await page.query_selector('a[href*="/biz/"]')
-                    if biz_link:
-                        href = await biz_link.get_attribute("href") or ""
-                        if href.startswith("/"):
-                            href = f"https://www.yelp.com{href}"
-                        if "/biz/" in href:
-                            await page.goto(href, timeout=20_000, wait_until="domcontentloaded")
-                            await asyncio.sleep(random.uniform(1.5, 3.0))
+                    # Check for blocking
+                    content = await page.content()
+                    if "unusual activity" in content.lower():
+                        _log("[Yelp] Blocked during enrichment — stopping detail extraction", "error")
+                        break
 
-                            # Extract website
-                            website_el = await page.query_selector('a[href*="biz_redir"]')
-                            if not website_el:
-                                website_el = await page.query_selector('p:has-text("Business website") + p a')
-                            if website_el:
-                                website = await website_el.get_attribute("href") or ""
-                                if website:
-                                    r["website_url"] = website
-                                    domain = _extract_domain(website)
-                                    if domain:
-                                        existing_domains.add(domain)
+                    # Extract website
+                    website_el = await page.query_selector('a[href*="biz_redir"]')
+                    if not website_el:
+                        website_el = await page.query_selector('p:has-text("Business website") + p a')
+                    if not website_el:
+                        # Try external link that's not yelp
+                        all_links = await page.query_selector_all('a[href^="http"]')
+                        for link in all_links:
+                            href = await link.get_attribute("href") or ""
+                            if href and "yelp.com" not in href and "google.com" not in href:
+                                text = await link.inner_text()
+                                if text and len(text) < 60:
+                                    website_el = link
+                                    break
+                    if website_el:
+                        website = await website_el.get_attribute("href") or ""
+                        if website and "yelp.com" not in website:
+                            r["website_url"] = website
+                            domain = _extract_domain(website)
+                            if domain:
+                                existing_domains.add(domain)
 
-                            # Extract phone
-                            phone_el = await page.query_selector('p:has-text("Phone number") + p')
-                            if phone_el:
-                                r["phone"] = (await phone_el.inner_text()).strip()
+                    # Extract phone
+                    phone_el = await page.query_selector('p:has-text("Phone number") + p')
+                    if not phone_el:
+                        phone_el = await page.query_selector('[href^="tel:"]')
+                    if phone_el:
+                        phone_text = await phone_el.inner_text()
+                        r["phone"] = phone_text.strip()
 
-                            # Extract address
-                            addr_el = await page.query_selector('a[href*="map"] p, address')
-                            if addr_el:
-                                r["address"] = (await addr_el.inner_text()).strip()
+                    # Extract address
+                    addr_el = await page.query_selector('address')
+                    if not addr_el:
+                        addr_el = await page.query_selector('a[href*="map"] p')
+                    if addr_el:
+                        r["address"] = (await addr_el.inner_text()).strip()
 
                 except Exception:
                     continue
@@ -215,6 +230,10 @@ async def scrape_yelp(
                 await asyncio.sleep(random.uniform(2.0, 4.0))
 
         await browser.close()
+
+    # Clean up internal keys
+    for r in results:
+        r.pop("_yelp_biz_url", None)
 
     _log(f"[Yelp] Extracted {len(results)} businesses", "success")
     return results
